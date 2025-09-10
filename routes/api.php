@@ -11,7 +11,7 @@ use App\Http\Controllers\BasicLoanController;
 use App\Http\Controllers\LoanAdvanceController;
 use App\Http\Controllers\EmiVsRentController;
 use App\Http\Controllers\DebtCalculatorController;
-
+use App\Http\Controllers\SipCalculatorController;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -36,11 +36,6 @@ Route::post('/emi/inflation', [TimeValueController::class, 'calculateWithInflati
 // Route::post('/basic-loan', [BasicLoanController::class, 'calculate']);
 Route::post('/advance-loan-calculator', [LoanAdvanceController::class, 'calculate']);
 Route::post('/emi-vs-rent', [EmiVsRentController::class, 'emiVsRentProjection']);
-Route::post('/debt/calc', [DebtCalculatorController::class, 'calculate']);
-// // CRUD Routes
-// Route::apiResource('basic-loans', BasicLoanController::class);
-
-// EMI Calculation Route
-Route::get('loans', [BasicLoanController::class, 'index']);
-
+Route::post('/debt/calc', [DebtCalculatorController::class, 'calculate'])
 Route::post('/loans', [BasicLoanController::class, 'store']);
+Route::post('/sip-calculate', [SipCalculatorController::class, 'calculate']);
