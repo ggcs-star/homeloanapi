@@ -12,6 +12,23 @@ use App\Http\Controllers\LoanAdvanceController;
 use App\Http\Controllers\EmiVsRentController;
 use App\Http\Controllers\DebtCalculatorController;
 use App\Http\Controllers\SipCalculatorController;
+use App\Http\Controllers\TimeValueHourController;
+use App\Http\Controllers\FutureValueController;
+use App\Http\Controllers\CostOfDelayController;
+use App\Http\Controllers\TaxSavingsCalculatorController;
+use App\Http\Controllers\CompoundInterestController;
+use App\Http\Controllers\MisCalculatorController;
+use App\Http\Controllers\GratuityCalculatorController;
+use App\Http\Controllers\ChildEducationController;
+use App\Http\Controllers\CareerBreakCalculatorController;
+use App\Http\Controllers\DualIncomeCalculatorController;
+use App\Http\Controllers\DiyVsOutsourceController;
+use App\Http\Controllers\FireCalcController;
+use App\Http\Controllers\MarriageCalculatorController;
+use App\Http\Controllers\RetirementCalculatorController;
+use App\Http\Controllers\BudgetPlannerController;
+use App\Http\Controllers\PricePerUseController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -33,9 +50,31 @@ Route::post('/equivalent-rate', [EquivalentRateController::class, 'calculate']);
 Route::post('/loan-vs-swp', [LoanVsSwpController::class, 'calculate']);
 Route::post('/emi-prepay-vs-invest', [EmiPrepayController::class, 'calculate']);
 Route::post('/emi/inflation', [TimeValueController::class, 'calculateWithInflation']);
-// Route::post('/basic-loan', [BasicLoanController::class, 'calculate']);
+Route::post('/basic-loan', [BasicLoanController::class, 'calculate']);
 Route::post('/advance-loan-calculator', [LoanAdvanceController::class, 'calculate']);
 Route::post('/emi-vs-rent', [EmiVsRentController::class, 'emiVsRentProjection']);
-Route::post('/debt/calc', [DebtCalculatorController::class, 'calculate'])
+Route::post('/debt/calc', [DebtCalculatorController::class, 'calculate']);
+Route::get('loans', [BasicLoanController::class, 'index']);
 Route::post('/loans', [BasicLoanController::class, 'store']);
 Route::post('/sip-calculate', [SipCalculatorController::class, 'calculate']);
+Route::post('/time-value-hour', [TimeValueHourController::class, 'calculate']);
+Route::post('/future-value', [FutureValueController::class, 'calculate']);
+Route::post('/sip/cost-of-delay', [CostOfDelayController::class, 'calculate']);
+Route::post('/tax-savings-vs-investment', [TaxSavingsCalculatorController::class, 'calculate']);
+Route::post('/compound-interest', [CompoundInterestController::class, 'calculate']);
+Route::post('/mis-calculate', [MisCalculatorController::class, 'calculate']);
+Route::post('/gratuity-calculate', [GratuityCalculatorController::class, 'calculate']);
+Route::post('car/compare', [\App\Http\Controllers\CarLeaseVsBuyController::class, 'compare']);
+Route::post('/tco/compare', [\App\Http\Controllers\TwoCarTcoController::class, 'compare']);
+Route::post('/transportation/compare', [\App\Http\Controllers\TransportationCostController::class, 'compare']);
+Route::post('/fuel/estimate', [\App\Http\Controllers\FuelCostController::class, 'estimate']);
+Route::post('/child-education-calc', [ChildEducationController::class, 'calculate']);
+Route::post('/career-break-calc', [CareerBreakCalculatorController::class, 'calculate']);
+Route::post('/dual-income-calc', [DualIncomeCalculatorController::class, 'calculate']);
+Route::post('/diy-vs-outsource', [DiyVsOutsourceController::class, 'calculate']);
+Route::post('/fire-calc', [FireCalculatorController::class, 'calculate']);
+Route::post('/fire-calc', [FireCalcController::class, 'calculate']);
+Route::post('/marriage-calc', [MarriageCalculatorController::class, 'calculate']);
+Route::post('/retirement-calc', [RetirementCalculatorController::class, 'calculate']);
+Route::post('/budget-calc', [BudgetPlannerController::class, 'calculate']);
+Route::post('/price-per-use', [PricePerUseController::class, 'calculate']);

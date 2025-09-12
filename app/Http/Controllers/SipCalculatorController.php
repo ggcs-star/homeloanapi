@@ -48,7 +48,7 @@ class SipCalculatorController extends Controller
             'years' => $t,
             'invested_amount' => ($P * $n * $t) + $lumpsum,
             'maturity_value' => round($future_value, 2),
-            'total_gain' => round($future_value - (($P * $n * $t) + $lumpsum), 2),
+            'total_intrest_earn' => round($future_value - (($P * $n * $t) + $lumpsum), 2),
         ]);
     }
 }
