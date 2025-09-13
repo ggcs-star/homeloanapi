@@ -29,6 +29,26 @@ use App\Http\Controllers\RetirementCalculatorController;
 use App\Http\Controllers\BudgetPlannerController;
 use App\Http\Controllers\PricePerUseController;
 
+use App\Http\Controllers\Any_insurance_policy_evaluation;
+
+use App\Http\Controllers\Chit_fund_vs_Mutual_fund;
+use App\Http\Controllers\Compound_interst;
+use App\Http\Controllers\Currency_Depreciation_invesment;
+use App\Http\Controllers\Dividend_vs_growth_invesment;
+use App\Http\Controllers\Future_value_of_aniteam_inflation;
+use App\Http\Controllers\Higher_education_cost_calculator;
+use App\Http\Controllers\Job_switch_impact_calculator;
+use App\Http\Controllers\Lic_policy_net_interstrate;
+use App\Http\Controllers\Lifestyle_helth_roi;
+use App\Http\Controllers\Real_return_after_tax;
+use App\Http\Controllers\Relocation_opportunity_calculator;
+use App\Http\Controllers\Senior_citizen_saving;
+use App\Http\Controllers\Simple_interstrate_Calculator;
+use App\Http\Controllers\Social_media_Timewaste;
+use App\Http\Controllers\Swp_systematic_withdrawal_plan;
+use App\Http\Controllers\Work_from_home_calculator;
+
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -78,3 +98,20 @@ Route::post('/marriage-calc', [MarriageCalculatorController::class, 'calculate']
 Route::post('/retirement-calc', [RetirementCalculatorController::class, 'calculate']);
 Route::post('/budget-calc', [BudgetPlannerController::class, 'calculate']);
 Route::post('/price-per-use', [PricePerUseController::class, 'calculate']);
+
+Route::post('/Lifestyle_helth_roi', [Lifestyle_helth_roi::class, 'calculate']);
+Route::post('/Higher_education_cost_calculator', [Higher_education_cost_calculator::class, 'calculate']);
+Route::post('/Job_switch_impact_calculator', [Job_switch_impact_calculator::class, 'calculate']);
+Route::post('/Work_from_home_calculator', [Work_from_home_calculator::class, 'calculate']);
+Route::post('/Social_media_Timewaste', [Social_media_Timewaste::class, 'calculate']);
+Route::post('/Any_insurance_policy_evaluation', [Any_insurance_policy_evaluation::class, 'calculate']);
+Route::post('/Lic_policy_net_interstrate', [Lic_policy_net_interstrate::class, 'calculate']);
+Route::post('/Relocation_opportunity_calculator', [Relocation_opportunity_calculator::class, 'calculate']);
+Route::post('/Senior_citizen_saving', [Senior_citizen_saving::class, 'calculate']);
+Route::post('/Currency_Depreciation_invesment', [Currency_Depreciation_invesment::class, 'calculate']);
+Route::post('/Simple_interstrate_Calculator', [Simple_interstrate_Calculator::class, 'calculate']);
+Route::post('/dividend-vs-growth', [Dividend_vs_growth_invesment::class, 'compare']);
+Route::post('/Chit_fund_vs_Mutual_fund', [Chit_fund_vs_Mutual_fund::class, 'calculate']);
+Route::post('/real-return-after-tax', [Real_return_after_tax::class, 'calculate']);
+Route::post('/Swp_syatematic_withdrawal_plan', [Swp_systematic_withdrawal_plan::class, 'calculate']);
+Route::post('/Future_value_of_aniteam_inflation', [Future_value_of_aniteam_inflation::class, 'calculate']);
