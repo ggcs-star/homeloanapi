@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Rate;
 
 class DualIncomeCalculatorController extends Controller
 {
@@ -20,15 +21,31 @@ class DualIncomeCalculatorController extends Controller
             'extra_home' => 'required|numeric',
             'time_opportunity_cost' => 'required|numeric',
             'analysis_years' => 'required|integer|min:1',
-            'investment_return' => 'required|numeric',
+            'investment_return' => 'nullable|numeric|min:0', // optional now
         ]);
+
+        // ✅ DB fetch
+        $rateData = Rate::where('calculator', 'commision-calculator')->first();
+
+        // Investment return (user → admin → fallback)
+        if ($request->filled('investment_return')) {
+            $r = (float) $validated['investment_return'] / 100.0;
+            $returnSource = 'user';
+        } else {
+            if ($rateData && isset($rateData->settings['loan_rate'])) {
+                $r = (float) $rateData->settings['loan_rate'] / 100.0;
+            } else {
+                $r = 0.10; // fallback 10%
+            }
+            $returnSource = 'admin';
+        }
 
         // Inputs
         $primary = (float) $validated['primary_income'];
         $secondary = (float) $validated['secondary_income'];
         $taxRate = (float) $validated['tax_rate_secondary'] / 100.0;
 
-        // Individual extra-costs (dual-income only)
+        // Extra costs
         $childcare = (float) $validated['childcare'];
         $commuting = (float) $validated['commuting'];
         $meals = (float) $validated['meals'];
@@ -37,34 +54,28 @@ class DualIncomeCalculatorController extends Controller
         $extra_home = (float) $validated['extra_home'];
         $time_opportunity_cost = (float) $validated['time_opportunity_cost'];
 
-        // Aggregate
         $total_extra_costs = $childcare + $commuting + $meals + $wardrobe + $housekeeping + $extra_home + $time_opportunity_cost;
 
         $years = (int) $validated['analysis_years'];
-        $r = (float) $validated['investment_return'] / 100.0;
 
         // Dual-income scenario
-        $secondary_net = $secondary * (1.0 - $taxRate);          // net after tax
+        $secondary_net = $secondary * (1.0 - $taxRate);
         $dual_effective = $primary + $secondary_net - $total_extra_costs;
 
-        // Single-income scenario: partner not working -> you save the extra costs
-        // Effective single-income take-home = primary + total_extra_costs
+        // Single-income scenario
         $single_effective = $primary + $total_extra_costs;
 
-        // Difference (Single - Dual)
+        // Difference
         $annual_difference = $single_effective - $dual_effective;
 
-        // Future value of investing that annual difference for `years` at rate r (annuity future value)
+        // Future value
         if ($r == 0.0) {
             $future_value = $annual_difference * $years;
         } else {
             $future_value = $annual_difference * (pow(1.0 + $r, $years) - 1.0) / $r;
         }
 
-        // Round to nearest rupee
-        $round = function ($val) {
-            return (int) round($val);
-        };
+        $round = fn($val) => (int) round($val);
 
         return response()->json([
             'secondary_net_income' => $round($secondary_net),
@@ -72,7 +83,11 @@ class DualIncomeCalculatorController extends Controller
             'dual_income_effective_annual' => $round($dual_effective),
             'single_income_effective_annual' => $round($single_effective),
             'annual_difference_single_minus_dual' => $round($annual_difference),
-            'future_value_of_annual_difference' => $round($future_value)
+            'future_value_of_annual_difference' => $round($future_value),
+            'rates_used' => [
+                'investment_return_percent' => round($r * 100, 2),
+                'investment_return_source'  => $returnSource
+            ]
         ]);
     }
 }

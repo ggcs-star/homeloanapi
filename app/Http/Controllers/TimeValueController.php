@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Rate; // ✅ DB से fetch करने के लिए
 
 class TimeValueController extends Controller
 {
@@ -19,21 +20,41 @@ class TimeValueController extends Controller
     {
         try {
             $monthlyEmi = (float) $request->input('monthly_emi', 0);
-            $years = (int) $request->input('years', 0);
-            $inflation = (float) $request->input('inflation', 0);
-            $mode = strtolower($request->input('mode', 'yearly'));
+            $years      = (int) $request->input('years', 0);
+            $mode       = strtolower($request->input('mode', 'yearly'));
 
             if ($monthlyEmi <= 0 || $years <= 0) {
                 return response()->json([
-                    'status' => 'error',
+                    'status'  => 'error',
                     'message' => 'monthly_emi and years must be greater than 0',
-                    'error' => 'Invalid input',
-                    'data' => null
+                    'error'   => 'Invalid input',
+                    'data'    => null
                 ], 400);
             }
 
+            // ✅ Inflation fetch (User → DB → Error)
+            if ($request->filled('inflation')) {
+                $inflation = (float) $request->input('inflation');
+                $inflationSource = 'user_input';
+            } else {
+                $rateData = Rate::where('calculator', 'commision-calculator')->first();
+                $adminInflation = $rateData->settings['inflation_rate'] ?? null;
+
+                if ($adminInflation !== null) {
+                    $inflation = (float) $adminInflation;
+                    $inflationSource = 'db_admin';
+                } else {
+                    return response()->json([
+                        'status'  => 'error',
+                        'message' => 'Inflation rate not provided in request or DB.',
+                        'error'   => null,
+                        'data'    => null
+                    ], 422);
+                }
+            }
+
             $totalMonths = $years * 12;
-            $totalPaid = $monthlyEmi * $totalMonths;
+            $totalPaid   = $monthlyEmi * $totalMonths;
 
             $yearlyBreakdown = [];
             $pvTotal = 0.0;
@@ -49,9 +70,9 @@ class TimeValueController extends Controller
                         $pvTotal += $pvMonth;
                     }
                     $yearlyBreakdown[] = [
-                        'year' => $y,
-                        'monthly_emi' => round($monthlyEmi, 2),
-                        'pv_of_year_total' => round($pvYear, 2),
+                        'year'                => $y,
+                        'monthly_emi'         => round($monthlyEmi, 2),
+                        'pv_of_year_total'    => round($pvYear, 2),
                         'pv_of_emi_avg_month' => round($pvYear / 12, 2)
                     ];
                 }
@@ -62,35 +83,36 @@ class TimeValueController extends Controller
                     $pvYearTotal = $pvPerMonthInYear * 12;
                     $pvTotal += $pvYearTotal;
                     $yearlyBreakdown[] = [
-                        'year' => $y,
-                        'monthly_emi' => round($monthlyEmi, 2),
-                        'pv_of_emi' => round($pvPerMonthInYear, 2),
+                        'year'         => $y,
+                        'monthly_emi'  => round($monthlyEmi, 2),
+                        'pv_of_emi'    => round($pvPerMonthInYear, 2),
                         'pv_of_year_total' => round($pvYearTotal, 2)
                     ];
                 }
             }
 
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'EMI inflation calculation completed successfully',
-                'error' => null,
-                'data' => [
-                    'mode' => $mode,
-                    'monthly_emi' => round($monthlyEmi, 2),
-                    'years' => $years,
-                    'inflation_percent' => $inflation,
-                    'total_amount_paid' => round($totalPaid, 2),
-                    'pv_of_total_amount' => round($pvTotal, 2),
-                    'yearly_breakdown' => $yearlyBreakdown
+                'error'   => null,
+                'data'    => [
+                    'mode'                 => $mode,
+                    'monthly_emi'          => round($monthlyEmi, 2),
+                    'years'                => $years,
+                    'inflation_percent'    => $inflation,
+                    'inflation_source'     => $inflationSource,
+                    'total_amount_paid'    => round($totalPaid, 2),
+                    'pv_of_total_amount'   => round($pvTotal, 2),
+                    'yearly_breakdown'     => $yearlyBreakdown
                 ]
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Failed to calculate EMI with inflation',
-                'error' => $e->getMessage(),
-                'data' => null
+                'error'   => $e->getMessage(),
+                'data'    => null
             ], 500);
         }
     }

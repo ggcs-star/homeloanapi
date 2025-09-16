@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
+use App\Models\Rate;
 
 class Real_return_after_tax extends Controller
 {
@@ -32,42 +33,71 @@ class Real_return_after_tax extends Controller
     {
         $rules = [
             'investment_amount' => 'required|numeric|min:0',
-            'annual_return_rate' => 'required|numeric',
-            'annual_inflation_rate' => 'required|numeric',
             'tax_rate_on_returns' => 'required|numeric|min:0|max:100',
-            // Either duration_years + duration_months OR duration + duration_unit
-            'duration_years' => 'nullable|numeric|min:0',
-            'duration_months' => 'nullable|numeric|min:0|max:1200',
-            'duration' => 'nullable|numeric|min:0',
-            'duration_unit' => 'nullable|string|in:years,months',
+
+            // Duration fields
+            'duration_years' => 'sometimes|numeric|min:0',
+            'duration_months' => 'sometimes|numeric|min:0|max:1200',
+            'duration' => 'sometimes|numeric|min:0',
+            'duration_unit' => 'sometimes|string|in:years,months',
+
+            // ✅ User input allowed
+            'annual_return_rate' => 'sometimes|numeric|min:0',
+            'annual_inflation_rate' => 'sometimes|numeric|min:0',
         ];
 
         $validator = Validator::make($request->all(), $rules);
-
         if ($validator->fails()) {
             return $this->error('Validation failed.', $validator->errors()->toArray(), 422);
         }
 
-        // Inputs
-        $P = (float) $request->input('investment_amount');
-        $r_nominal_pct = (float) $request->input('annual_return_rate');
-        $inflation_pct = (float) $request->input('annual_inflation_rate');
+        // ✅ DB से fetch (commission-calculator)
+        $rateData = Rate::where('calculator', 'commision-calculator')->first();
+        $adminReturn     = $rateData->settings['expected_return_rate'] ?? null;
+        $adminLoanRate   = $rateData->settings['loan_rate'] ?? null;
+        $adminInflation  = $rateData->settings['inflation_rate'] ?? null;
+
+        // ✅ Return Rate (User → DB expected_return_rate → DB loan_rate → Error)
+        if ($request->filled('annual_return_rate')) {
+            $r_nominal_pct = (float) $request->input('annual_return_rate');
+            $returnSource = 'user_input';
+        } elseif ($adminReturn !== null) {
+            $r_nominal_pct = (float) $adminReturn;
+            $returnSource = 'db_expected_return_rate';
+        } elseif ($adminLoanRate !== null) {
+            $r_nominal_pct = (float) $adminLoanRate;
+            $returnSource = 'db_loan_rate';
+        } else {
+            return $this->error('Annual return rate not provided in request or DB.', [], 422);
+        }
+
+        // ✅ Inflation Rate (User → DB → Error)
+        if ($request->filled('annual_inflation_rate')) {
+            $inflation_pct = (float) $request->input('annual_inflation_rate');
+            $inflationSource = 'user_input';
+        } elseif ($adminInflation !== null) {
+            $inflation_pct = (float) $adminInflation;
+            $inflationSource = 'db_admin';
+        } else {
+            return $this->error('Annual inflation rate not provided in request or DB.', [], 422);
+        }
+
+        // ✅ Tax rate
         $tax_pct = (float) $request->input('tax_rate_on_returns');
 
+        // ✅ Conversions
+        $P = (float) $request->input('investment_amount');
         $r_nominal = $r_nominal_pct / 100.0;
         $inflation = $inflation_pct / 100.0;
         $tax_rate = $tax_pct / 100.0;
 
-        // ----------------------------
-        // Duration handling
-        // ----------------------------
         $fv_after_tax = 0.0;
         $real_fv = 0.0;
         $real_rate = 0.0;
         $r_after_tax = 0.0;
 
+        // ✅ Duration handling
         if ($request->filled('duration_years') || $request->filled('duration_months')) {
-            // Use years + months combo
             $years = (float) $request->input('duration_years', 0);
             $months = (float) $request->input('duration_months', 0);
             $n_years = $years + ($months / 12.0);
@@ -77,7 +107,6 @@ class Real_return_after_tax extends Controller
             $real_fv = $fv_after_tax / pow(1 + $inflation, $n_years);
             $real_rate = (1 + $r_after_tax) / (1 + $inflation) - 1;
         } elseif ($request->filled('duration') && $request->filled('duration_unit')) {
-            // Old logic fallback
             $duration = (float) $request->input('duration');
             $unit = $request->input('duration_unit');
 
@@ -99,14 +128,17 @@ class Real_return_after_tax extends Controller
             }
         }
 
-        // ----------------------------
-        // Round & return
-        // ----------------------------
         $data = [
             'future_value_after_tax'       => round($fv_after_tax, 2),
             'real_future_value'            => round($real_fv, 2),
             'nominal_after_tax_percent'    => round($r_after_tax * 100, 2),
             'real_rate_of_return_percent'  => round($real_rate * 100, 2),
+            'rates_used' => [
+                'return_rate_percent'   => $r_nominal_pct,
+                'return_rate_source'    => $returnSource,
+                'inflation_rate_percent'=> $inflation_pct,
+                'inflation_rate_source' => $inflationSource,
+            ]
         ];
 
         return $this->success('Investment calculation completed successfully.', $data, 200);

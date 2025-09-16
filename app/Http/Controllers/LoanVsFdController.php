@@ -3,20 +3,20 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Models\InterestRate;
+use App\Models\Rate; // ✅ DB से rates लाने के लिए
 
 class LoanVsFdController extends Controller
 {
     public function calculate(Request $request)
     {
         try {
+            // ✅ Principal user input (default: 10,00,000)
             $principal = (float) $request->input('principal', 1000000);
-            $inflation = (float) $request->input('inflation', 6);
 
             $term = (float) $request->input('term', 10);
-            $termType = strtolower($request->input('term_type', 'years')); // "years" or "months"
+            $termType = strtolower($request->input('term_type', 'years'));
 
-            // ✅ Term calculation based on type
+            // ✅ Term conversion
             if ($termType === 'months') {
                 $termMonths = (int) $term;
                 $termYears = $termMonths / 12.0;
@@ -25,9 +25,28 @@ class LoanVsFdController extends Controller
                 $termMonths = (int) ($termYears * 12);
             }
 
-            // ✅ Fetch rates from DB (fallback default if not found)
-            $loanRate = InterestRate::where('type', 'loan')->value('rate') ?? 9;
-            $fdRate   = InterestRate::where('type', 'fd')->value('rate') ?? 8;
+            // ✅ Current controller name as calculator key
+            $calculatorName = class_basename(__CLASS__);
+
+            // ✅ DB से admin defaults लाओ
+            $rateData = Rate::where('calculator', 'commision-calculator')->first();
+
+            $adminLoanRate      = $rateData->settings['loan_rate']      ?? null;
+            $adminFdRate        = $rateData->settings['fd_rate']        ?? null;
+            $adminInflationRate = $rateData->settings['inflation_rate'] ?? null;
+
+            // ✅ User input > Admin default > System fallback
+            $loanRate = $request->filled('loan_rate')
+                ? (float) $request->input('loan_rate')
+                : ($adminLoanRate ?? 10.0);
+
+            $fdRate = $request->filled('fd_rate')
+                ? (float) $request->input('fd_rate')
+                : ($adminFdRate ?? 8.0);
+
+            $inflationRate = $request->filled('inflation_rate')
+                ? (float) $request->input('inflation_rate')
+                : ($adminInflationRate ?? 5.0);
 
             // ---------- Loan calculation ----------
             $monthlyRate = $loanRate / 12 / 100;
@@ -43,6 +62,23 @@ class LoanVsFdController extends Controller
             // ---------- FD calculation ----------
             $fdMaturity = $principal * pow(1 + $fdRate / 100, $termYears);
             $fdInterest = $fdMaturity - $principal;
+
+            // ---------- Inflation adjustment ----------
+            $inflationFactor = pow(1 + $inflationRate / 100, $termYears);
+            $fdRealValue = $fdMaturity / $inflationFactor;
+
+            // ✅ Source check
+            $loanRateSource = $request->filled('loan_rate')
+                ? 'user_input'
+                : ($adminLoanRate !== null ? 'admin_default' : 'system_default');
+
+            $fdRateSource = $request->filled('fd_rate')
+                ? 'user_input'
+                : ($adminFdRate !== null ? 'admin_default' : 'system_default');
+
+            $inflationRateSource = $request->filled('inflation_rate')
+                ? 'user_input'
+                : ($adminInflationRate !== null ? 'admin_default' : 'system_default');
 
             return response()->json([
                 'status' => 'success',
@@ -62,10 +98,15 @@ class LoanVsFdController extends Controller
                     'fd_details' => [
                         'total_interest_earned' => round($fdInterest, 2),
                         'fd_maturity' => round($fdMaturity, 2),
+                        'real_value_after_inflation' => round($fdRealValue, 2),
                     ],
                     'rates_used' => [
-                        'loan_rate_from_db' => $loanRate,
-                        'fd_rate_from_db' => $fdRate
+                        'loan_rate' => $loanRate,
+                        'loan_rate_source' => $loanRateSource,
+                        'fd_rate' => $fdRate,
+                        'fd_rate_source' => $fdRateSource,
+                        'inflation_rate' => $inflationRate,
+                        'inflation_rate_source' => $inflationRateSource,
                     ]
                 ]
             ]);

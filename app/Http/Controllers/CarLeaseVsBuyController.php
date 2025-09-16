@@ -4,14 +4,10 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use App\Models\Rate;
 
-class CarLeaseVsBuyController extends \App\Http\Controllers\Controller
+class CarLeaseVsBuyController extends Controller
 {
-    /**
-     * POST /api/car/compare
-     * Accepts JSON and returns the summary + detailed fields using the exact formulas
-     * that match the screenshot values.
-     */
     public function compare(Request $request)
     {
         $rules = [
@@ -21,11 +17,10 @@ class CarLeaseVsBuyController extends \App\Http\Controllers\Controller
 
             'lease.deposit' => 'required|numeric|min:0',
             'lease.monthly_payment' => 'required|numeric|min:0',
-            // NOTE: lease term ignored for total lease payments (we use analysis_period_years*12 to match screenshot)
             'lease.annual_maintenance' => 'nullable|numeric|min:0',
 
             'buy.down_payment' => 'required|numeric|min:0',
-            'buy.loan_interest_rate_percent' => 'required|numeric|min:0',
+            'buy.loan_interest_rate_percent' => 'nullable|numeric|min:0', // optional
             'buy.loan_tenure_years' => 'required|numeric|min:0',
             'buy.annual_maintenance' => 'nullable|numeric|min:0',
             'buy.annual_depreciation_percent' => 'required|numeric|min:0',
@@ -38,30 +33,47 @@ class CarLeaseVsBuyController extends \App\Http\Controllers\Controller
 
         $data = $request->all();
 
-        // normalize inputs
         $carPrice = floatval($data['car_price']);
         $years = intval($data['analysis_period_years']);
         $analysisMonths = $years * 12;
-        $opportunityRate = floatval($data['opportunity_cost_percent']) / 100.0;
 
-        // --- Leasing (match screenshot logic) ---
+        // ✅ Loan Rate (user → admin → fallback 10)
+        if (!empty($data['buy']['loan_interest_rate_percent'])) {
+            $buyInterestPercent = floatval($data['buy']['loan_interest_rate_percent']);
+            $loanRateSource = 'user';
+        } else {
+            $calculatorName = class_basename(__CLASS__); // "CarLeaseVsBuyController"
+            $rateData = Rate::where('calculator',  'commision-calculator')->first();
+
+            if ($rateData && isset($rateData->settings['loan_rate'])) {
+                $buyInterestPercent = (float) $rateData->settings['loan_rate'];
+            } elseif ($rateData && isset($rateData->settings['interest_rate'])) {
+                $buyInterestPercent = (float) $rateData->settings['interest_rate'];
+            } else {
+                $buyInterestPercent = 10; // fallback
+            }
+
+            $loanRateSource = 'admin';
+        }
+
+        // ✅ Opportunity cost हमेशा user से
+        $opportunityRatePercent = floatval($data['opportunity_cost_percent']);
+        $opportunityRate = $opportunityRatePercent / 100.0;
+
+        // --- Leasing ---
         $leaseDeposit = floatval($data['lease']['deposit']);
         $leaseMonthly = floatval($data['lease']['monthly_payment']);
         $leaseAnnualMaintenance = floatval($data['lease']['annual_maintenance'] ?? 0.0);
 
-        // Total lease payments over the analysis period (deposit + monthly * analysisMonths)
         $totalLeasePayments = $leaseDeposit + ($leaseMonthly * $analysisMonths);
         $leaseMaintenanceTotal = $leaseAnnualMaintenance * $years;
 
-        // Opportunity-cost benefit = (buy.down_payment - lease.deposit) grown for `years` at opportunityRate (future growth minus principal)
         $buyDown = floatval($data['buy']['down_payment']);
         $opportunityBenefit = ($buyDown - $leaseDeposit) * (pow(1 + $opportunityRate, $years) - 1);
 
-        // If buyDown < leaseDeposit, opportunityBenefit will be negative (i.e., a cost rather than benefit).
         $netLeasingCost = $totalLeasePayments + $leaseMaintenanceTotal - $opportunityBenefit;
 
         // --- Buying ---
-        $buyInterestPercent = floatval($data['buy']['loan_interest_rate_percent']);
         $buyTenureYears = floatval($data['buy']['loan_tenure_years']);
         $buyAnnualMaintenance = floatval($data['buy']['annual_maintenance'] ?? 0.0);
         $buyDepPercent = floatval($data['buy']['annual_depreciation_percent']) / 100.0;
@@ -82,13 +94,10 @@ class CarLeaseVsBuyController extends \App\Http\Controllers\Controller
         }
 
         $buyMaintenanceTotal = $buyAnnualMaintenance * $years;
-
-        // Residual value after `years` using straight annual depreciation on book value
         $estimatedResaleValue = $carPrice * pow(1 - $buyDepPercent, $years);
-
         $netBuyingCost = $buyDown + $totalLoanRepayment + $buyMaintenanceTotal - $estimatedResaleValue;
 
-        // Build response with rounded values (2 decimals)
+        // --- Response ---
         $result = [
             'inputs' => $data,
             'summary_comparison' => [
@@ -112,6 +121,10 @@ class CarLeaseVsBuyController extends \App\Http\Controllers\Controller
                     'monthly_emi' => round($emi, 2),
                 ],
             ],
+            'rates_used' => [
+                'loan_interest_rate_percent' => $buyInterestPercent,
+                'loan_rate_source' => $loanRateSource
+            ]
         ];
 
         return response()->json($result);

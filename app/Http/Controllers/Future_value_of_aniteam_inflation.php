@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 use Illuminate\Support\Facades\Log;
+use App\Models\Rate;
 
 class Future_value_of_aniteam_inflation extends Controller
 {
@@ -34,7 +35,7 @@ class Future_value_of_aniteam_inflation extends Controller
     {
         $rules = [
             'current_cost' => 'required|numeric|min:0',
-            'annual_inflation_rate' => 'required|numeric',
+            'annual_inflation_rate' => 'nullable|numeric|min:0', // ✅ user input optional
             'years' => 'required|numeric|min:0',
             'term_unit' => 'required|string|in:years,months',
         ];
@@ -47,9 +48,22 @@ class Future_value_of_aniteam_inflation extends Controller
 
         try {
             $current = (float) $request->input('current_cost');
-            $annualInflation = (float) $request->input('annual_inflation_rate');
             $termValue = (float) $request->input('years');
             $termUnit = $request->input('term_unit');
+
+            // ✅ Fetch inflation rate from DB if user input missing
+            if ($request->filled('annual_inflation_rate')) {
+                $annualInflation = (float) $request->input('annual_inflation_rate');
+                $inflationSource = 'user';
+            } else {
+                $rateData = Rate::where('calculator', 'commision-calculator')->first();
+                if ($rateData && isset($rateData->settings['inflation_rate'])) {
+                    $annualInflation = (float) $rateData->settings['inflation_rate'];
+                } else {
+                    $annualInflation = 6.0; // fallback default
+                }
+                $inflationSource = 'admin';
+            }
 
             $r = $annualInflation / 100.0;
 
@@ -65,7 +79,11 @@ class Future_value_of_aniteam_inflation extends Controller
             $futureRounded = round($future, 2);
 
             $data = [
-                'future_cost' => $futureRounded
+                'future_cost' => $futureRounded,
+                'rates_used' => [
+                    'annual_inflation_rate' => $annualInflation,
+                    'inflation_source' => $inflationSource
+                ]
             ];
 
             return $this->success('Future cost calculated successfully.', $data, 200);

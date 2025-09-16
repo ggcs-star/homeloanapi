@@ -3,31 +3,74 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Validator;
+use App\Models\Rate; // ✅ DB से fetch करने के लिए
 
 class SipCalculatorController extends Controller
 {
-    public function calculate(Request $request)
+    protected function success(string $message, array $data = [], int $code = 200): JsonResponse
     {
-        $request->validate([
-            'lumpsum' => 'nullable|numeric|min:0',
-            'deposit' => 'required|numeric|min:1',
-            'frequency' => 'required|string|in:weekly,monthly,quarterly,half-yearly,yearly',
-            'annual_rate' => 'required|numeric|min:1',
-            'years' => 'required|numeric|min:1',
-        ]);
+        return response()->json([
+            'status'  => 'success',
+            'message' => $message,
+            'error'   => null,
+            'data'    => $data,
+        ], $code);
+    }
 
-        $lumpsum = $request->input('lumpsum', 0);
-        $P = $request->input('deposit');  
-        $r = $request->input('annual_rate') / 100; 
-        $t = $request->input('years');
+    protected function error(string $message, array $errors = [], int $code = 422): JsonResponse
+    {
+        return response()->json([
+            'status'  => 'error',
+            'message' => $message,
+            'error'   => $errors,
+            'data'    => null,
+        ], $code);
+    }
+
+    public function calculate(Request $request): JsonResponse
+    {
+        $rules = [
+            'lumpsum'   => 'nullable|numeric|min:0',
+            'deposit'   => 'required|numeric|min:1',
+            'frequency' => 'required|string|in:weekly,monthly,quarterly,half-yearly,yearly',
+            'annual_rate' => 'sometimes|numeric|min:0', // ✅ अब required नहीं
+            'years'     => 'required|numeric|min:1',
+        ];
+
+        $validator = Validator::make($request->all(), $rules);
+        if ($validator->fails()) {
+            return $this->error('Validation failed.', $validator->errors()->toArray(), 422);
+        }
+
+        $lumpsum = (float) $request->input('lumpsum', 0);
+        $P       = (float) $request->input('deposit');
+        $t       = (int) $request->input('years');
+
+        // ✅ Annual Rate (User → DB → Error)
+        if ($request->filled('annual_rate')) {
+            $annualRate = (float) $request->input('annual_rate');
+            $rateSource = 'user_input';
+        } else {
+            $rateData = Rate::where('calculator', 'commision-calculator')->first();
+            if ($rateData && isset($rateData->settings['loan_rate'])) {
+                $annualRate = (float) $rateData->settings['loan_rate'];
+                $rateSource = 'db_admin';
+            } else {
+                return $this->error('Annual rate not provided in request or DB (loan_rate missing).', [], 422);
+            }
+        }
+
+        $r = $annualRate / 100;
 
         // Frequency mapping
         $frequencyMap = [
-            'weekly' => 52,
-            'monthly' => 12,
-            'quarterly' => 4,
-            'half-yearly' => 2,
-            'yearly' => 1,
+            'weekly'       => 52,
+            'monthly'      => 12,
+            'quarterly'    => 4,
+            'half-yearly'  => 2,
+            'yearly'       => 1,
         ];
 
         $n = $frequencyMap[strtolower($request->input('frequency'))];
@@ -40,15 +83,18 @@ class SipCalculatorController extends Controller
 
         $future_value = $fv_sip + $fv_lumpsum;
 
-        return response()->json([
-            'initial_lumpsum' => $lumpsum,
-            'regular_deposit' => $P,
-            'deposit_frequency' => $request->input('frequency'),
-            'annual_rate_percent' => $request->input('annual_rate'),
-            'years' => $t,
-            'invested_amount' => ($P * $n * $t) + $lumpsum,
-            'maturity_value' => round($future_value, 2),
-            'total_intrest_earn' => round($future_value - (($P * $n * $t) + $lumpsum), 2),
-        ]);
+        $data = [
+            'initial_lumpsum'       => $lumpsum,
+            'regular_deposit'       => $P,
+            'deposit_frequency'     => $request->input('frequency'),
+            'annual_rate_percent'   => $annualRate,
+            'rate_source'           => $rateSource,
+            'years'                 => $t,
+            'invested_amount'       => ($P * $n * $t) + $lumpsum,
+            'maturity_value'        => round($future_value, 2),
+            'total_interest_earned' => round($future_value - (($P * $n * $t) + $lumpsum), 2),
+        ];
+
+        return $this->success('SIP calculation completed successfully.', $data, 200);
     }
 }

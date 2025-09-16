@@ -3,21 +3,50 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Rate;
 
 class EmiPrepayController extends Controller
 {
     public function calculate(Request $request)
     {
         try {
-            // Inputs
             $loan_amount   = (float) $request->input('loan_amount', 1000000);
-            $loan_rate     = (float) $request->input('loan_rate', 8.5);
-            $tenure        = (float) $request->input('tenure', 240); // default 240 months = 20 years
-            $tenure_type   = strtolower($request->input('tenure_type', 'months')); // "years" or "months"
+            $tenure        = (float) $request->input('tenure', 240);
+            $tenure_type   = strtolower($request->input('tenure_type', 'months'));
             $prepayment    = (float) $request->input('prepayment', 200000);
-            $invest_rate   = (float) $request->input('invest_rate', 12);
 
-            // ✅ Term calculation based on type
+            // ✅ Fetch DB record
+            $rateData = Rate::where('calculator', 'commision-calculator')->first();
+
+            // Loan Rate (user → admin → fallback)
+            if ($request->filled('loan_rate')) {
+                $loan_rate = (float) $request->input('loan_rate');
+                $loanRateSource = 'user';
+            } else {
+                if ($rateData && isset($rateData->settings['loan_rate'])) {
+                    $loan_rate = (float) $rateData->settings['loan_rate'];
+                } else {
+                    $loan_rate = 10.0; // fallback
+                }
+                $loanRateSource = 'admin';
+            }
+
+            // Investment Rate (user → admin → fallback)
+            if ($request->filled('invest_rate')) {
+                $invest_rate = (float) $request->input('invest_rate');
+                $investRateSource = 'user';
+            } else {
+                if ($rateData && isset($rateData->settings['inflation_rate'])) {
+                    $invest_rate = (float) $rateData->settings['inflation_rate'];
+                } elseif ($rateData && isset($rateData->settings['loan_rate'])) {
+                    $invest_rate = (float) $rateData->settings['loan_rate'];
+                } else {
+                    $invest_rate = 12.0; // fallback
+                }
+                $investRateSource = 'admin';
+            }
+
+            // ✅ Term calculation
             if ($tenure_type === 'years') {
                 $tenure_years  = $tenure;
                 $tenure_months = (int) ($tenure * 12);
@@ -35,7 +64,7 @@ class EmiPrepayController extends Controller
             $total_payment_original = $emi * $tenure_months;
             $total_interest_original = $total_payment_original - $loan_amount;
 
-            // After prepayment (reduce tenure, keep EMI same)
+            // After prepayment
             $remaining_loan = $loan_amount - $prepayment;
             $months_after_prepay = log($emi / ($emi - $remaining_loan * $monthly_rate)) / log(1 + $monthly_rate);
 
@@ -60,11 +89,13 @@ class EmiPrepayController extends Controller
                     "input" => [
                         "loan_amount" => $loan_amount,
                         "loan_rate_percent" => $loan_rate,
+                        "loan_rate_source" => $loanRateSource,
                         "tenure_years" => round($tenure_years, 2),
                         "tenure_months" => $tenure_months,
                         "tenure_type" => $tenure_type,
                         "prepayment" => $prepayment,
                         "invest_rate_percent" => $invest_rate,
+                        "invest_rate_source" => $investRateSource,
                     ],
                     "scenario" => [
                         "prepayment_savings" => round($interest_saved, 2),

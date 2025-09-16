@@ -5,10 +5,11 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
+use App\Models\Rate; // ✅ DB से fetch करने के लिए
 
 class Senior_citizen_saving extends Controller
 {
-     protected function success(string $message, array $data = [], int $code = 200): JsonResponse
+    protected function success(string $message, array $data = [], int $code = 200): JsonResponse
     {
         return response()->json([
             'status'  => 'success',
@@ -33,7 +34,7 @@ class Senior_citizen_saving extends Controller
      * Body JSON:
      * {
      *   "deposit_amount": 100000,
-     *   "annual_interest_rate": 5
+     *   "annual_interest_rate": 5   // optional, वरना DB से loan_rate fetch होगा
      * }
      *
      * Always uses 5 years (20 quarters).
@@ -42,7 +43,7 @@ class Senior_citizen_saving extends Controller
     {
         $rules = [
             'deposit_amount' => 'required|numeric|min:0|max:3000000',
-            'annual_interest_rate' => 'required|numeric|min:0',
+            'annual_interest_rate' => 'sometimes|numeric|min:0', // ✅ optional now
         ];
 
         $validator = Validator::make($request->all(), $rules);
@@ -51,7 +52,20 @@ class Senior_citizen_saving extends Controller
         }
 
         $P = (float) $request->input('deposit_amount');
-        $annualRatePct = (float) $request->input('annual_interest_rate');
+
+        // ✅ Loan Rate: User → DB → Error
+        if ($request->filled('annual_interest_rate')) {
+            $annualRatePct = (float) $request->input('annual_interest_rate');
+            $rateSource = 'user_input';
+        } else {
+            $rateData = Rate::where('calculator', 'commision-calculator')->first();
+            if ($rateData && isset($rateData->settings['loan_rate'])) {
+                $annualRatePct = (float) $rateData->settings['loan_rate'];
+                $rateSource = 'db_admin';
+            } else {
+                return $this->error('Annual interest rate not provided in request or DB.', [], 422);
+            }
+        }
 
         // Fixed 5 years = 20 quarters
         $years = 5;
@@ -71,8 +85,10 @@ class Senior_citizen_saving extends Controller
 
         $data = [
             'quarterly_interest' => round($quarterlyInterest, 2),
-            'total_interest' => round($totalInterest, 2),
-            'final_balance' => round($finalBalance, 2),
+            'total_interest'     => round($totalInterest, 2),
+            'final_balance'      => round($finalBalance, 2),
+            'rate_used_percent'  => $annualRatePct,
+            'rate_source'        => $rateSource,
         ];
 
         return $this->success('SCSS calculation completed successfully.', $data, 200);

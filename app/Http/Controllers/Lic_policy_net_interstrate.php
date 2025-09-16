@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use App\Models\Rate;
 
 class Lic_policy_net_interstrate extends Controller
 {
@@ -37,7 +38,7 @@ class Lic_policy_net_interstrate extends Controller
                 'premium_frequency' => 'required|string|in:yearly,monthly',
                 'policy_term_years' => 'required|numeric|min:1|max:100',
                 'sum_assured' => 'required|numeric|min:0',
-                'expected_inflation_percent' => 'required|numeric|min:0|max:100',
+                'expected_inflation_percent' => 'sometimes|numeric|min:0|max:100', // ✅ user input optional
                 'premium_is_annual' => 'sometimes|boolean',
             ];
 
@@ -50,44 +51,49 @@ class Lic_policy_net_interstrate extends Controller
             $frequency = strtolower($request->input('premium_frequency'));
             $years = (int) $request->input('policy_term_years');
             $sumAssured = (float) $request->input('sum_assured');
-            $inflationPct = (float) $request->input('expected_inflation_percent');
             $premiumIsAnnual = (bool) $request->input('premium_is_annual', false);
+
+            // ✅ Inflation Rate Selection (User → DB → Fallback)
+            if ($request->filled('expected_inflation_percent')) {
+                $inflationPct = (float) $request->input('expected_inflation_percent');
+                $rateSource = 'user';
+            } else {
+                $rateData = Rate::where('calculator', 'commision-calculator')->first();
+                if ($rateData && isset($rateData->settings['inflation_rate'])) {
+                    $inflationPct = (float) $rateData->settings['inflation_rate'];
+                    $rateSource = 'admin';
+                } else {
+                    $inflationPct = 6.0; // fallback
+                    $rateSource = 'fallback';
+                }
+            }
 
             $periodsPerYear = $frequency === 'monthly' ? 12 : 1;
             $totalPeriods = $years * $periodsPerYear;
 
-            // Safety guard: don't allow total periods > 1200 (100 years monthly)
             if ($totalPeriods > 1200) {
                 return $this->error('policy_term_years too large (would create huge cashflow).', [], 422);
             }
 
-            // Convert annual premium to per-period if requested
             $premium = ($premiumIsAnnual && $frequency === 'monthly') ? $premiumInput / $periodsPerYear : $premiumInput;
 
-            // Build cashflows
             $n = max(1, (int)$totalPeriods);
             $cashflows = array_fill(0, $n, -$premium);
             $cashflows[$n - 1] += $sumAssured;
             $totalPremiumsPaid = $premium * $n;
 
-            // Compute IRR (per-period)
             $periodRate = $this->calculateIRR($cashflows);
 
-            // Decide fallbacks and compute annualized percentage
             if (!is_finite($periodRate) || is_nan($periodRate)) {
                 if ($frequency === 'monthly') {
-                    // monthly fallback = 0.01 (%)
                     $annualIrrPercent = 0.01;
                     $equivalentSip = 0.01;
                     $note = 'IRR solver failed; fallback set to 0.01% for monthly mode.';
                 } else {
-                    // yearly fallback = 0.00 (%)
                     $annualIrrPercent = 0.00;
                     $equivalentSip = 0.00;
                     $note = 'IRR solver failed; fallback set to 0.00% for yearly mode.';
                 }
-
-                // Log fallback use for debugging
                 Log::warning('IRR solver failed and fallback applied', [
                     'frequency' => $frequency,
                     'premium' => $premium,
@@ -95,7 +101,6 @@ class Lic_policy_net_interstrate extends Controller
                     'sumAssured' => $sumAssured,
                 ]);
             } else {
-                // Solver returned a valid per-period rate — annualize correctly
                 if ($periodRate <= -0.9999999999) {
                     $annualIrrPercent = -100.0;
                 } else {
@@ -106,7 +111,7 @@ class Lic_policy_net_interstrate extends Controller
                 $note = null;
             }
 
-            // PV of sum assured after inflation (discounted by years)
+            // ✅ PV with chosen inflation
             $pvSumAssured = $years > 0 ? $sumAssured / pow(1 + ($inflationPct / 100), $years) : $sumAssured;
 
             $data = [
@@ -115,6 +120,8 @@ class Lic_policy_net_interstrate extends Controller
                 'total_premiums_paid'             => round($totalPremiumsPaid, 2),
                 'sum_assured'                     => round($sumAssured, 2),
                 'equivalent_sip_return_rate'      => round($equivalentSip, 2),
+                'inflation_rate_percent'          => $inflationPct,
+                'inflation_rate_source'           => $rateSource,
             ];
 
             if ($note) {
@@ -138,9 +145,6 @@ class Lic_policy_net_interstrate extends Controller
         }
     }
 
-    /**
-     * IRR solver with Newton-Raphson + bisection fallback
-     */
     private function calculateIRR(array $cashflows, float $guess = 0.01): float
     {
         $maxIterations = 300;
@@ -171,22 +175,20 @@ class Lic_policy_net_interstrate extends Controller
             return $deriv;
         };
 
-        // Newton-Raphson attempt
         $rate = $guess;
         for ($i = 0; $i < $maxIterations; $i++) {
             if (!is_finite($rate) || $rate <= -0.9999999999) break;
             $npv = $npvFn($rate);
             $deriv = $derivFn($rate);
             if (!is_finite($npv) || !is_finite($deriv)) break;
-            if (abs($npv) < $tolerance) return $rate;
+            if (abs($npv) < $tolerance) return (float)$rate;
             if (abs($deriv) < 1e-15) break;
             $newRate = $rate - $npv / $deriv;
             if (!is_finite($newRate) || $newRate <= -0.9999999999) break;
-            if (abs($newRate - $rate) < $tolerance) return $newRate;
+            if (abs($newRate - $rate) < $tolerance) return (float)$newRate;
             $rate = $newRate;
         }
 
-        // Bisection fallback
         $low = -0.9999999999;
         $high = 10.0;
         $fLow = $npvFn($low + 1e-12);
@@ -206,7 +208,7 @@ class Lic_policy_net_interstrate extends Controller
             $mid = ($low + $high) / 2;
             $fMid = $npvFn($mid);
             if (!is_finite($fMid)) return NAN;
-            if (abs($fMid) < $tolerance) return $mid;
+            if (abs($fMid) < $tolerance) return (float)$mid;
             if ($fLow * $fMid < 0) {
                 $high = $mid;
                 $fHigh = $fMid;
@@ -214,7 +216,7 @@ class Lic_policy_net_interstrate extends Controller
                 $low = $mid;
                 $fLow = $fMid;
             }
-            if (abs($high - $low) < $tolerance) return ($high + $low) / 2;
+            if (abs($high - $low) < $tolerance) return (float)(($high + $low) / 2);
         }
 
         return NAN;

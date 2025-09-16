@@ -4,8 +4,9 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use App\Models\Rate; 
+use App\Traits\HasInterestRate;
 
 class Any_insurance_policy_evaluation extends Controller
 {
@@ -37,12 +38,24 @@ class Any_insurance_policy_evaluation extends Controller
             'premium_paying_term_years' => 'required|numeric|min:1|max:100',
             'total_policy_term_years' => 'required|numeric|min:1|max:200',
             'sum_assured' => 'required|numeric|min:0',
-            'expected_inflation_percent' => 'required|numeric|min:0|max:100',
+            'expected_inflation_percent' => 'nullable|numeric|min:0|max:100', // optional
         ];
 
         $validator = Validator::make($request->all(), $rules);
         if ($validator->fails()) {
             return $this->error('Validation failed.', $validator->errors()->toArray(), 422);
+        }
+
+        // ✅ Step 1: User input
+        if ($request->filled('expected_inflation_percent')) {
+            $inflationPct = (float) $request->input('expected_inflation_percent');
+            $inflationSource = 'user';
+        } else {
+            // ✅ Step 2: Admin default from DB
+            $calculatorName = class_basename(__CLASS__);
+            $rateData = Rate::where('calculator', $calculatorName)->first();
+            $inflationPct = $rateData->settings['inflation_rate'] ?? 10; // fallback = 10
+            $inflationSource = 'admin';
         }
 
         // Inputs
@@ -51,7 +64,6 @@ class Any_insurance_policy_evaluation extends Controller
         $payingYears = (int) $request->input('premium_paying_term_years');
         $totalYears = (int) $request->input('total_policy_term_years');
         $sumAssured = (float) $request->input('sum_assured');
-        $inflationPct = (float) $request->input('expected_inflation_percent');
 
         // periods per year
         $periodsPerYear = match ($frequency) {
@@ -82,6 +94,10 @@ class Any_insurance_policy_evaluation extends Controller
             'present_value_of_sum_assured' => round($pvSumAssured, 2),
             'total_invested' => round($premium * $payingPeriods, 2),
             'sum_assured' => round($sumAssured, 2),
+            'rates_used' => [
+                'inflation_rate' => $inflationPct,
+                'inflation_rate_source' => $inflationSource
+            ]
         ];
 
         return $this->success('Insurance Policy Evaluation calculated successfully.', $data);

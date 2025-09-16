@@ -3,17 +3,32 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Rate; // ✅ DB model include
 
 class LoanAdvanceController extends Controller
 {
     public function calculate(Request $request)
     {
         try {
-            $principal = floatval($request->input('principal')); // Loan amount
-            $rate = floatval($request->input('rate'));           // Annual Interest Rate (%)
-            $tenure = floatval($request->input('tenure'));       // Term (years or months)
+            $principal = (float) $request->input('principal'); // Loan amount
+            $tenure = (float) $request->input('tenure');       // Term (years or months)
             $tenureType = strtolower($request->input('tenure_type', 'months')); // "years" or "months"
-            $extraRepayment = floatval($request->input('extra_repayment', 0)); // Extra monthly repayment
+            $extraRepayment = (float) $request->input('extra_repayment', 0); // Extra monthly repayment
+
+            // ✅ Interest Rate priority: User → DB → Fallback
+            if ($request->filled('rate')) {
+                $rate = (float) $request->input('rate');
+                $rateSource = 'user';
+            } else {
+                $rateData = Rate::where('calculator', 'commision-calculator')->first();
+                if ($rateData && isset($rateData->settings['loan_rate'])) {
+                    $rate = (float) $rateData->settings['loan_rate'];
+                    $rateSource = 'admin';
+                } else {
+                    $rate = 10.0; // fallback default
+                    $rateSource = 'fallback';
+                }
+            }
 
             // ✅ Validate inputs
             if ($principal <= 0 || $rate <= 0 || $tenure <= 0) {
@@ -82,6 +97,7 @@ class LoanAdvanceController extends Controller
                 'data' => [
                     'principal' => round($principal, 2),
                     'rate_percent' => $rate,
+                    'rate_source' => $rateSource, // ✅ track source
                     'tenure_years' => round($tenureYears, 2),
                     'tenure_months' => $tenureMonths,
                     'tenure_type' => $tenureType,

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Rate;
 
 class EquivalentRateController extends Controller
 {
@@ -10,10 +11,25 @@ class EquivalentRateController extends Controller
     {
         try {
             $years = (int) $request->input('years', 15);
-            $inputRate = (float) $request->input('rate', 10);
             $type = strtolower($request->input('type', 'loan interest'));
 
-            $principal = 1; // Only for rate calculation
+            // ✅ Fetch DB record
+            $rateData = Rate::where('calculator', 'commision-calculator')->first();
+
+            // ✅ Rate selection (user → DB loan_rate → fallback)
+            if ($request->filled('rate')) {
+                $inputRate = (float) $request->input('rate');
+                $rateSource = 'user';
+            } else {
+                if ($rateData && isset($rateData->settings['loan_rate'])) {
+                    $inputRate = (float) $rateData->settings['loan_rate'];
+                } else {
+                    $inputRate = 10.0; // fallback
+                }
+                $rateSource = 'admin';
+            }
+
+            $principal = 1; // only for rate calculation
             $equivalentRate = 0;
 
             if ($type == 'loan interest') {
@@ -58,6 +74,7 @@ class EquivalentRateController extends Controller
                 'data' => [
                     'given_type' => $type,
                     'input_rate_percent' => $inputRate,
+                    'input_rate_source' => $rateSource,
                     'years' => $years,
                     'equivalent_rate_percent' => $equivalentRate
                 ]
@@ -67,7 +84,7 @@ class EquivalentRateController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to calculate equivalent rate',
-                'error' => null, // don’t leak internal error
+                'error' => null,
                 'data' => null
             ], 500);
         }
